@@ -1,18 +1,18 @@
 
-# Sonos Platform
+# Fidelio Platform
 
 Example config.json:
 
+{
+  "accessories": [
     {
-      "accessories": [
-        {
-          "accessory": "Sonos",
-          "name": "Bedroom Speakers",
-          "room": "Bedroom"
-        }
-      ]
+      "accessory": "Fidelio",
+      "name": "Living Room Speakers",
+      "host": "Living_Room"
     }
+  ]
+}
 
-The `room` parameter must match the room name in Sonos exactly.
+The `host` can be a hostname or ip address.
 
-Note that the name "Speakers" is used in the name for this example instead of something more intuitive like "Sonos" or "Music" or "Radio", as Siri has many stronger associations for those words. For instance, including "Sonos" in the name will likely cause Siri to just launch the Sonos app. And including "Music" in the name will cause Siri to launch the built-in Music app.
+Note that the name "Speakers" is used in the name for this example instead of something more intuitive like "Philips" or "Music" or "Radio", as Siri has many stronger associations for those words. For instance, including "Music" in the name will cause Siri to launch the built-in Music app.

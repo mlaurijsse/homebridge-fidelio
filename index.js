@@ -1,4 +1,3 @@
-var sonos = require('sonos');
 var _ = require('underscore');
 var inherits = require('util').inherits;
 var Service, Characteristic, VolumeCharacteristic;
@@ -11,13 +10,13 @@ module.exports = function(homebridge) {
 
   // we can only do this after we receive the homebridge API object
   makeVolumeCharacteristic();
-  
-  homebridge.registerAccessory("homebridge-sonos", "Sonos", SonosAccessory);
-}
+
+  homebridge.registerAccessory("homebridge-fidelio", "Philips Fidelio", FidelioAccessory);
+};
 
 
 //
-// Node-Sonos Functions to process device information
+// Node-Fidelio Functions to process device information
 //
 
 function getBridges (deviceList) {
@@ -70,34 +69,6 @@ function getZoneCoordinator (zone, deviceList) {
   return coordinator;
 }
 
-function gatherDevicesList(accessory) {
-        var search = sonos.search(function(device, model) {
-                var data = {ip: device.host, port: device.port, model: model};
-
-                device.getZoneAttrs(function (err, attrs) {
-                        if (!err) {
-                                _.extend(data, attrs);
-                        }
-                        device.getZoneInfo(function (err, info) {
-                                if (!err) {
-                                        _.extend(data, info);
-                                }
-                                device.getTopology(function (err, info) {
-                                        if (!err) {
-                                                info.zones.forEach(function (group) {
-                                                        if (group.location == 'http://' + data.ip + ':' + data.port + '/xml/device_description.xml') {
-                                                                _.extend(data, group);
-                                                        }
-                                                });
-                                        }
-                                        devices.push(data);
-                                });
-                        });
-                        accessory.search();
-                });
-        });
-}
-
 
 
 //
@@ -107,23 +78,20 @@ function gatherDevicesList(accessory) {
 function SonosAccessory(log, config) {
   this.log = log;
   this.config = config;
-  this.name = config["name"];
-  this.room = config["room"];
-  
-  if (!this.room) throw new Error("You must provide a config value for 'room'.");
-  
+  this.name = config.name;
+
   this.service = new Service.Switch(this.name);
 
   this.service
     .getCharacteristic(Characteristic.On)
     .on('get', this.getOn.bind(this))
     .on('set', this.setOn.bind(this));
-  
+
   this.service
     .addCharacteristic(VolumeCharacteristic)
     .on('get', this.getVolume.bind(this))
     .on('set', this.setVolume.bind(this));
-  
+
   // prepare list of devices and properties, then begin searching for a Sonos device with the given name
   gatherDevicesList(this);
   // begin searching for a Sonos device with the given name
@@ -141,21 +109,21 @@ SonosAccessory.prototype.search = function() {
     this.log.debug("Found sonos device at %s", host);
 
     device.deviceDescription(function (err, description) {
-        
+
         var zoneType = description["zoneType"];
         var roomName = description["roomName"];
         var udn = description["UDN"];
-         
+
         if (!SonosAccessory.zoneTypeIsPlayable(zoneType)) {
           this.log.debug("Sonos device %s is not playable (has an unknown zone type of %s); ignoring", host, zoneType);
           return;
         }
-        
+
         if (roomName != this.room) {
           this.log.debug("Ignoring device %s because the room name '%s' does not match the desired name '%s'.", host, roomName, this.room);
           return;
         }
-        
+
         var coordinator = getZoneCoordinator(roomName, devices);
         if (coordinator != undefined) {
                 if (udn == "uuid:" + coordinator.uuid) {
@@ -167,7 +135,7 @@ SonosAccessory.prototype.search = function() {
                         }
                 }
         }
-        
+
     }.bind(this));
   }.bind(this));
 }
@@ -184,7 +152,7 @@ SonosAccessory.prototype.getOn = function(callback) {
   }
 
   this.device.getCurrentState(function(err, state) {
-    
+
     if (err) {
       callback(err);
     }
@@ -192,7 +160,7 @@ SonosAccessory.prototype.getOn = function(callback) {
       var on = (state == "playing");
       callback(null, on);
     }
-    
+
   }.bind(this));
 }
 
@@ -204,7 +172,7 @@ SonosAccessory.prototype.setOn = function(on, callback) {
   }
 
   this.log("Setting power to " + on);
-  
+
   if (on) {
     this.device.play(function(err, success) {
       this.log("Playback attempt with success: " + success);
@@ -237,7 +205,7 @@ SonosAccessory.prototype.getVolume = function(callback) {
   }
 
   this.device.getVolume(function(err, volume) {
-    
+
     if (err) {
       callback(err);
     }
@@ -245,7 +213,7 @@ SonosAccessory.prototype.getVolume = function(callback) {
       this.log("Current volume: %s", volume);
       callback(null, Number(volume));
     }
-    
+
   }.bind(this));
 }
 
@@ -257,7 +225,7 @@ SonosAccessory.prototype.setVolume = function(volume, callback) {
   }
 
   this.log("Setting volume to %s", volume);
-  
+
   this.device.setVolume(volume + "", function(err, data) {
     this.log("Set volume response with data: " + data);
     if (err) {
@@ -267,7 +235,7 @@ SonosAccessory.prototype.setVolume = function(volume, callback) {
       callback(null);
     }
   }.bind(this));
-}
+};
 
 
 //
@@ -288,6 +256,6 @@ function makeVolumeCharacteristic() {
     });
     this.value = this.getDefaultValue();
   };
-  
+
   inherits(VolumeCharacteristic, Characteristic);
 }
