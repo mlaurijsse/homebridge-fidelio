@@ -1,240 +1,215 @@
-var _ = require('underscore');
 var inherits = require('util').inherits;
+var request = require('request');
+var json5 = require('json5');
+
+
 var Service, Characteristic, VolumeCharacteristic;
 var devices = [];
-var registeredSonosZoneCoordinators = new Map();
 
 module.exports = function(homebridge) {
   Service = homebridge.hap.Service;
   Characteristic = homebridge.hap.Characteristic;
 
   // we can only do this after we receive the homebridge API object
-  makeVolumeCharacteristic();
+ makeVolumeCharacteristic();
 
-  homebridge.registerAccessory("homebridge-fidelio", "Philips Fidelio", FidelioAccessory);
+  homebridge.registerAccessory("homebridge-fidelio", "Fidelio", FidelioAccessory);
 };
 
 
-//
-// Node-Fidelio Functions to process device information
-//
-
-function getBridges (deviceList) {
-  var bridges = [];
-  deviceList.forEach(function (device) {
-    if (device.CurrentZoneName == 'BRIDGE' && bridges.indexOf(device.ip + ':' + device.port) == -1) {
-      bridges.push(device.ip + ':' + device.port);
-    }
-  });
-  return bridges;
-}
-
-function getBridgeDevices (deviceList) {
-  var bridgeDevices = [];
-  deviceList.forEach(function (device) {
-    if (device.CurrentZoneName == 'BRIDGE') {
-      bridgeDevices.push(device);
-    }
-  });
-  return bridgeDevices;
-}
-
-function getZones (deviceList) {
-  var zones = [];
-  deviceList.forEach(function (device) {
-    if (zones.indexOf(device.CurrentZoneName) == -1 && device.CurrentZoneName != 'BRIDGE') {
-      zones.push(device.CurrentZoneName);
-    }
-  });
-  return zones;
-}
-
-function getZoneDevices (zone, deviceList) {
-  var zoneDevices = [];
-  deviceList.forEach(function (device) {
-    if (device.CurrentZoneName == zone) {
-      zoneDevices.push(device);
-    }
-  });
-  return zoneDevices;
-}
-
-function getZoneCoordinator (zone, deviceList) {
-  var coordinator;
-  deviceList.forEach(function (device) {
-    if (device.CurrentZoneName == zone && device.coordinator == 'true') {
-      coordinator = device;
-    }
-  })
-  return coordinator;
-}
-
-
 
 //
-// Sonos Accessory
+// Fidelio Accessory
 //
 
-function SonosAccessory(log, config) {
+function FidelioAccessory(log, config) {
   this.log = log;
   this.config = config;
   this.name = config.name;
+  this.host = config.host;
+  this.url = 'http://' + this.host + ':8889/';
 
-  this.service = new Service.Switch(this.name);
 
-  this.service
-    .getCharacteristic(Characteristic.On)
-    .on('get', this.getOn.bind(this))
-    .on('set', this.setOn.bind(this));
+  this.informationService = new Service.AccessoryInformation();
 
-  this.service
-    .addCharacteristic(VolumeCharacteristic)
-    .on('get', this.getVolume.bind(this))
-    .on('set', this.setVolume.bind(this));
+  this.informationService
+    .setCharacteristic(Characteristic.Manufacturer, "Philips")
+    .setCharacteristic(Characteristic.Model, "Fidelio")
 
-  // prepare list of devices and properties, then begin searching for a Sonos device with the given name
-  gatherDevicesList(this);
-  // begin searching for a Sonos device with the given name
-  // this.search();
+  this.switchService = new Service.Switch(this.name + ' Power');
+
+  this.switchService
+  .getCharacteristic(Characteristic.On)
+  .on('get', this.getOn.bind(this))
+  .on('set', this.setOn.bind(this));
+
+  this.switchService
+  .addCharacteristic(VolumeCharacteristic)
+  .on('get', this.getVolume.bind(this))
+  .on('set', this.setVolume.bind(this));
+
+
+  this.cache = {};
+  this.cache.on = false;
+  this.cache.volume = 10;
+  this.cache.volumeNeedsUpdate = false;
+
+  this.log("Added speaker: %s, host: %s", this.name, this.host);
+
 }
 
-SonosAccessory.zoneTypeIsPlayable = function(zoneType) {
-  // 8 is the Sonos SUB, 4 is the Sonos Bridge, 11 is unknown
-  return zoneType != '11' && zoneType != '8' && zoneType != '4';
-}
+FidelioAccessory.prototype.getServices = function() {
+  return [this.informationService, this.switchService];
+};
 
-SonosAccessory.prototype.search = function() {
-  var search = sonos.search(function(device) {
-    var host = device.host;
-    this.log.debug("Found sonos device at %s", host);
+FidelioAccessory.prototype._request = function (url, callback) {
 
-    device.deviceDescription(function (err, description) {
-
-        var zoneType = description["zoneType"];
-        var roomName = description["roomName"];
-        var udn = description["UDN"];
-
-        if (!SonosAccessory.zoneTypeIsPlayable(zoneType)) {
-          this.log.debug("Sonos device %s is not playable (has an unknown zone type of %s); ignoring", host, zoneType);
-          return;
-        }
-
-        if (roomName != this.room) {
-          this.log.debug("Ignoring device %s because the room name '%s' does not match the desired name '%s'.", host, roomName, this.room);
-          return;
-        }
-
-        var coordinator = getZoneCoordinator(roomName, devices);
-        if (coordinator != undefined) {
-                if (udn == "uuid:" + coordinator.uuid) {
-                        if (registeredSonosZoneCoordinators.get(coordinator.uuid) == undefined) {
-                                this.log("Found a playable coordinator device at %s for room '%s'", host, roomName);
-                                this.device = device;
-                                registeredSonosZoneCoordinators.set(coordinator.uuid, coordinator);
-                                search.socket.close(); // we don't need to continue searching.
-                        }
-                }
-        }
-
-    }.bind(this));
-  }.bind(this));
-}
-
-SonosAccessory.prototype.getServices = function() {
-  return [this.service];
-}
-
-SonosAccessory.prototype.getOn = function(callback) {
-  if (!this.device) {
-    this.log.warn("Ignoring request; Sonos device has not yet been discovered.");
-    callback(new Error("Sonos has not been discovered yet."));
-    return;
-  }
-
-  this.device.getCurrentState(function(err, state) {
-
-    if (err) {
-      callback(err);
+  request(url, function (error, response, body) {
+    if (error) {
+      callback(error);
+      return;
     }
-    else {
-      var on = (state == "playing");
-      callback(null, on);
+    if (response.statusCode != 200) {
+      callback(new Error("Invalid HTTP statusCode: " + response.statusCode));
+      return;
     }
+    callback(error, body);
+  });
 
+};
+
+
+
+FidelioAccessory.prototype.getOn = function(callback, silent) {
+
+  var url = this.url + 'HOMESTATUS';
+
+  this._request(url, function (error, result) {
+    if (error) {
+      this.log('getOn() failed: %s', error.message);
+      callback(error, this.cache.on);
+      return;
+    }
+      var obj = json5.parse(result);
+      if (obj.command == 'STANDBY') {
+        var powerOn = !obj.value;
+        if (!silent) {
+          this.log('Power is currently %d', powerOn);
+        }
+        callback(null, powerOn);
+
+      } else {
+
+        callback(new Error("Invalid HOMESTATUS response"));
+
+      }
   }.bind(this));
-}
+};
 
-SonosAccessory.prototype.setOn = function(on, callback) {
-  if (!this.device) {
-    this.log.warn("Ignoring request; Sonos device has not yet been discovered.");
-    callback(new Error("Sonos has not been discovered yet."));
-    return;
-  }
-
-  this.log("Setting power to " + on);
+FidelioAccessory.prototype.setOn = function(on, callback) {
 
   if (on) {
-    this.device.play(function(err, success) {
-      this.log("Playback attempt with success: " + success);
-      if (err) {
-        callback(err);
-      }
-      else {
-        callback(null);
+    // switch me on by calling index
+    var url = this.url + 'index';
+    request(url, function (error, result) {
+
+      if (error) {
+        this.log('setOn() failed: %s', error.message);
+        callback(error);
+      } else {
+        this.log("Power set to %d", on);
+        if (this.cache.volumeNeedsUpdate) {
+          this.setVolume(this.cache.volume, callback);
+        } else {
+          callback(null);
+        }
       }
     }.bind(this));
-  }
-  else {
-      this.device.stop(function(err, success) {
-          this.log("Stop attempt with success: " + success);
-          if (err) {
-            callback(err);
-          }
-          else {
+
+  } else {
+    // switch me off
+
+    // first check if I'm not yet switched off
+    this.getOn(function (err,state) {
+      if (err) {
+        this.log('setOn() failed: %s', err.message);
+        callback(err);
+        return;
+      }
+      if (state == 1) {
+        // apparently I'm switched on, so switch me off;
+        var url = this.url + 'CTRL$STANDBY';
+        request(url, function (error, result) {
+          if (error) {
+            this.log('setOn() failed: %s', error.message);
+            callback(error);
+          } else {
+            this.log("Power set to %d", on);
             callback(null);
           }
-      }.bind(this));
+        }.bind(this));
+      } else {
+        callback(null);
+      }
+    }.bind(this), true);
   }
-}
+};
 
-SonosAccessory.prototype.getVolume = function(callback) {
-  if (!this.device) {
-    this.log.warn("Ignoring request; Sonos device has not yet been discovered.");
-    callback(new Error("Sonos has not been discovered yet."));
-    return;
-  }
+FidelioAccessory.prototype.getVolume = function(callback) {
+  var url = this.url + 'ELAPSE';
 
-  this.device.getVolume(function(err, volume) {
-
-    if (err) {
-      callback(err);
-    }
-    else {
-      this.log("Current volume: %s", volume);
-      callback(null, Number(volume));
+  this._request(url, function (error, result) {
+    if (error) {
+      this.log('getVolume() failed: %s', error.message);
+      callback(error, this.cache.volume);
+      return;
     }
 
+    var obj = json5.parse(result);
+
+    if (obj.command == 'ELAPSE') {
+      var vol = Math.round(obj.volume / 64.0 * 100.0);
+      this.log('Got current volume: %d%% (%d)', vol, obj.volume);
+      this.cache.volume = vol;
+      callback(null, vol);
+
+    } else if (obj.command == 'NOTHING') {
+      this.log('Returned volume from cache: %d', this.cache.volume);
+      callback(null, this.cache.volume);
+    } else {
+      callback(new Error("Unknown ELAPSE response"));
+    }
   }.bind(this));
-}
 
-SonosAccessory.prototype.setVolume = function(volume, callback) {
-  if (!this.device) {
-    this.log.warn("Ignoring request; Sonos device has not yet been discovered.");
-    callback(new Error("Sonos has not been discovered yet."));
-    return;
-  }
+};
 
-  this.log("Setting volume to %s", volume);
+FidelioAccessory.prototype.setVolume = function(volume, callback) {
 
-  this.device.setVolume(volume + "", function(err, data) {
-    this.log("Set volume response with data: " + data);
-    if (err) {
-      callback(err);
-    }
-    else {
+  this.getOn(function (error, on) {
+    if (!error && on) {
+      var vol = Math.round(volume / 100.0 * 64.0);
+
+      var url = this.url + 'VOLUME$VAL$' + vol;
+      request(url, function (error, result) {
+
+        if (error) {
+          this.log('setVolume() failed: %s', error.message);
+          callback(error);
+        } else {
+          this.log('Volume Set: %d%% (%d)', volume, vol);
+          this.cache.volume = volume;
+          this.cache.volumeNeedsUpdate = false;
+          callback(null);
+        }
+      }.bind(this));
+    } else {
+      this.log('Wrote volume to cache: %d%%', volume);
+      this.cache.volume = volume;
+      this.cache.volumeNeedsUpdate = true;
       callback(null);
     }
-  }.bind(this));
+  }.bind(this), true);
+
 };
 
 
