@@ -18,6 +18,7 @@ Example config.json:
           "nav$03$03$005$1",
           "digin_optical"
         ]
+
       }
     ]
   }
