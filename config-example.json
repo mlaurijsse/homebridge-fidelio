@@ -1,0 +1,17 @@
+{
+  "accessories": [
+    {
+      "accessory": "Fidelio",
+      "name": "Living Room Speakers",
+      "host": "192.168.0.10",
+      "channels": [
+        "nav$03$03$001$1",
+        "nav$03$03$002$1",
+        "nav$03$03$003$1",
+        "nav$03$03$004$1",
+        "nav$03$03$005$1",
+        "digin_optical"
+      ]
+    }
+  ]
+}

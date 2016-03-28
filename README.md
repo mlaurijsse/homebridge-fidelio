@@ -3,15 +3,15 @@
 
 Example config.json:
 
-{
-  "accessories": [
-    {
-      "accessory": "Fidelio",
-      "name": "Living Room Speakers",
-      "host": "Living_Room"
-    }
-  ]
-}
+  {
+    "accessories": [
+      {
+        "accessory": "Fidelio",
+        "name": "Living Room Speakers",
+        "host": "Living_Room"
+      }
+    ]
+  }
 
 The `host` can be a hostname or ip address.
 

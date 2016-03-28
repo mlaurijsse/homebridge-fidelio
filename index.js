@@ -1,6 +1,7 @@
 var inherits = require('util').inherits;
 var request = require('request');
 var json5 = require('json5');
+var uuid = require('hap-nodejs').uuid;
 
 
 var Service, Characteristic, VolumeCharacteristic;
@@ -11,7 +12,7 @@ module.exports = function(homebridge) {
   Characteristic = homebridge.hap.Characteristic;
 
   // we can only do this after we receive the homebridge API object
- makeVolumeCharacteristic();
+  makeVolumeCharacteristic();
 
   homebridge.registerAccessory("homebridge-fidelio", "Fidelio", FidelioAccessory);
 };
@@ -29,12 +30,11 @@ function FidelioAccessory(log, config) {
   this.host = config.host;
   this.url = 'http://' + this.host + ':8889/';
 
-
   this.informationService = new Service.AccessoryInformation();
 
   this.informationService
     .setCharacteristic(Characteristic.Manufacturer, "Philips")
-    .setCharacteristic(Characteristic.Model, "Fidelio")
+    .setCharacteristic(Characteristic.Model, "Fidelio");
 
   this.switchService = new Service.Switch(this.name + ' Power');
 
@@ -48,11 +48,22 @@ function FidelioAccessory(log, config) {
   .on('get', this.getVolume.bind(this))
   .on('set', this.setVolume.bind(this));
 
+  if (config.channels) {
+    this.channels = config.channels;
+
+    channelCharacteristic = makeChannelCharacteristic(this.channels.length);
+
+    this.switchService
+      .addCharacteristic(channelCharacteristic)
+      .on('get', this.getChannel.bind(this))
+      .on('set', this.setChannel.bind(this));
+  }
 
   this.cache = {};
   this.cache.on = false;
   this.cache.volume = 10;
   this.cache.volumeNeedsUpdate = false;
+  this.cache.channel = 1;
 
   this.log("Added speaker: %s, host: %s", this.name, this.host);
 
@@ -212,6 +223,33 @@ FidelioAccessory.prototype.setVolume = function(volume, callback) {
 
 };
 
+FidelioAccessory.prototype.getChannel = function(callback) {
+  // Currently I don't know a way to query this information from the speakers,
+  // so using cache instead.
+
+  this.log('Getting channel from cache: %d', this.cache.channel);
+  callback(null, this.cache.channel);
+};
+
+
+FidelioAccessory.prototype.setChannel = function(channel, callback) {
+
+  var url = this.url + this.channels[channel-1];
+
+  request(url, function (error, result) {
+    if (error) {
+      this.log('setChannel() failed: %s', error.message);
+      callback(error);
+    } else {
+      this.log("Channel set to %d (%s)", channel, this.channels[channel-1]);
+      this.cache.channel = channel;
+      callback(null);
+    }
+  }.bind(this));
+
+};
+
+
 
 //
 // Custom Characteristic for Volume
@@ -233,4 +271,24 @@ function makeVolumeCharacteristic() {
   };
 
   inherits(VolumeCharacteristic, Characteristic);
+}
+
+function makeChannelCharacteristic(count) {
+
+  channelCharacteristic = function() {
+    Characteristic.call(this, 'Channel', uuid.generate('Channel-' + count));
+    this.setProps({
+      format: Characteristic.Formats.INT,
+      maxValue: count,
+      minValue: 1,
+      minStep: 1,
+      perms: [Characteristic.Perms.READ, Characteristic.Perms.WRITE, Characteristic.Perms.NOTIFY]
+    });
+    this.value = this.getDefaultValue();
+  };
+
+  inherits(channelCharacteristic, Characteristic);
+
+  return channelCharacteristic;
+
 }
