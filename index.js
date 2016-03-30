@@ -119,7 +119,7 @@ FidelioAccessory.prototype._initAlsa = function() {
         this.setVolume(vol, function(dummy){});
       }
     }.bind(this));
-  });
+  }.bind(this));
 };
 
 FidelioAccessory.prototype._request = function (url, callback) {
