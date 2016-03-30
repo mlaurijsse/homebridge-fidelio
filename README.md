@@ -9,7 +9,7 @@ Example config.json:
       {
         "accessory": "Fidelio",
         "name": "Living Room Speakers",
-        "host": "Living_Room"
+        "host": "Living_Room",
         "channels": [
           "nav$03$03$001$1",
           "nav$03$03$002$1",
@@ -17,8 +17,8 @@ Example config.json:
           "nav$03$03$004$1",
           "nav$03$03$005$1",
           "digin_optical"
-        ]
-
+        ],
+        "alsa": false
       }
     ]
   }
@@ -27,5 +27,7 @@ Example config.json:
 The `host` can be a hostname or ip address. The hostname of your speaker can be configured using the Airstudio+ app. However, I found reference by hostname was unstable in my setup, during boot/reset the hostname 'blackfin' is sometimes used.
 
 The `channels` represent different sources supported by the speaker. To investigate all options please visit http://hostname:8889/index
+
+If the option `alsa` is set to true, the volume of this speaker will follow the volume of alsa mixer (default device).
 
 Note that the name "Speakers" is used in the name for this example instead of something more intuitive like "Philips" or "Music" or "Radio", as Siri has many stronger associations for those words. For instance, including "Music" in the name will cause Siri to launch the built-in Music app.
