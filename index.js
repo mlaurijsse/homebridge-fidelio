@@ -2,6 +2,17 @@ var inherits = require('util').inherits;
 var request = require('request');
 var json5 = require('json5');
 var uuid = require('hap-nodejs').uuid;
+try {
+  var alsa = require('alsa-monitor');
+} catch (er) {
+  var alsa = null;
+}
+try {
+  var loudness = require('loudness');
+} catch (er) {
+  var loudness = null;
+}
+
 
 
 var Service, Characteristic, VolumeCharacteristic;
@@ -30,12 +41,14 @@ function FidelioAccessory(log, config) {
   this.host = config.host;
   this.url = 'http://' + this.host + ':8889/';
 
+  // Set device information
   this.informationService = new Service.AccessoryInformation();
 
   this.informationService
     .setCharacteristic(Characteristic.Manufacturer, "Philips")
     .setCharacteristic(Characteristic.Model, "Fidelio");
 
+  // Add homekit Switch service
   this.switchService = new Service.Switch(this.name + ' Power');
 
   this.switchService
@@ -48,22 +61,35 @@ function FidelioAccessory(log, config) {
   .on('get', this.getVolume.bind(this))
   .on('set', this.setVolume.bind(this));
 
+  // Optionally add channel Characteristic
   if (config.channels) {
     this.channels = config.channels;
 
+    // Make channel-n Characteristic
     channelCharacteristic = makeChannelCharacteristic(this.channels.length);
 
+    // Add Characteristic to switchService
     this.switchService
       .addCharacteristic(channelCharacteristic)
       .on('get', this.getChannel.bind(this))
       .on('set', this.setChannel.bind(this));
   }
 
+  // Optionally initiate alsa part
+  this.alsa = config.alsa || false;
+  if (this.alsa) {
+    this._initAlsa();
+  }
+
+  // initiate cache settings
   this.cache = {};
-  this.cache.on = false;
-  this.cache.volume = 10;
+  if (!config.cache) {
+    config.cache = false;
+  }
+  this.cache.on = config.cache.on || false;
+  this.cache.volume = config.cache.volume || 10;
   this.cache.volumeNeedsUpdate = false;
-  this.cache.channel = 1;
+  this.cache.channel = config.cache.channel || 1;
 
   this.log("Added speaker: %s, host: %s", this.name, this.host);
 
@@ -71,6 +97,29 @@ function FidelioAccessory(log, config) {
 
 FidelioAccessory.prototype.getServices = function() {
   return [this.informationService, this.switchService];
+};
+
+FidelioAccessory.prototype._initAlsa = function() {
+  if (alsa === null) {
+    this.log('Error: Module `alsa-monitor` is not found, disabling alsa');
+    this.alsa = false;
+    return;
+  }
+  if (loudness === null) {
+    this.log('Error: Module `loudness` is not found, disabling alsa');
+    this.alsa = false;
+    return;
+  }
+
+  alsa.monitor(function() {
+    loudness.getVolume(function (err, vol) {
+      if (err) {
+        this.log('loudness.getVolume() failed: %s', error.message);
+      } else {
+        this.setVolume(vol, function(dummy){});
+      }
+    }.bind(this));
+  });
 };
 
 FidelioAccessory.prototype._request = function (url, callback) {

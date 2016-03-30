@@ -11,7 +11,8 @@
         "nav$03$03$004$1",
         "nav$03$03$005$1",
         "digin_optical"
-      ]
+      ],
+      "alsa": false
     }
   ]
 }
