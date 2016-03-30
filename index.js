@@ -1,15 +1,19 @@
 var inherits = require('util').inherits;
 var request = require('request');
 var json5 = require('json5');
-var uuid = require('hap-nodejs').uuid;
+try {
+  var uuid = require('hap-nodejs').uuid;
+} catch (error) {
+  var uuid = null;
+}
 try {
   var alsa = require('alsa-monitor');
-} catch (er) {
+} catch (error) {
   var alsa = null;
 }
 try {
   var loudness = require('loudness');
-} catch (er) {
+} catch (error) {
   var loudness = null;
 }
 
@@ -101,12 +105,12 @@ FidelioAccessory.prototype.getServices = function() {
 
 FidelioAccessory.prototype._initAlsa = function() {
   if (alsa === null) {
-    this.log('Error: Module `alsa-monitor` is not found, disabling alsa');
+    this.log('Warning: Module `alsa-monitor` is not found, disabling alsa');
     this.alsa = false;
     return;
   }
   if (loudness === null) {
-    this.log('Error: Module `loudness` is not found, disabling alsa');
+    this.log('Warning: Module `loudness` is not found, disabling alsa');
     this.alsa = false;
     return;
   }
@@ -114,7 +118,7 @@ FidelioAccessory.prototype._initAlsa = function() {
   alsa.monitor(function() {
     loudness.getVolume(function (error, vol) {
       if (error) {
-        this.log('loudness.getVolume() failed: %s', error.message);
+        this.log('Error: loudness.getVolume() failed: %s', error.message);
       } else {
         this.setVolume(vol, function(dummy){});
       }
@@ -146,7 +150,7 @@ FidelioAccessory.prototype.getOn = function(callback, silent) {
 
   this._request(url, function (error, result) {
     if (error) {
-      this.log('getOn() failed: %s', error.message);
+      this.log('Error: getOn() failed: %s', error.message);
       callback(error, this.cache.on);
       return;
     }
@@ -174,7 +178,7 @@ FidelioAccessory.prototype.setOn = function(on, callback) {
     request(url, function (error, result) {
 
       if (error) {
-        this.log('setOn() failed: %s', error.message);
+        this.log('Error: setOn() failed: %s', error.message);
         callback(error);
       } else {
         this.log("Power set to %d", on);
@@ -192,7 +196,7 @@ FidelioAccessory.prototype.setOn = function(on, callback) {
     // first check if I'm not yet switched off
     this.getOn(function (err,state) {
       if (err) {
-        this.log('setOn() failed: %s', err.message);
+        this.log('Error: setOn() failed: %s', err.message);
         callback(err);
         return;
       }
@@ -201,7 +205,7 @@ FidelioAccessory.prototype.setOn = function(on, callback) {
         var url = this.url + 'CTRL$STANDBY';
         request(url, function (error, result) {
           if (error) {
-            this.log('setOn() failed: %s', error.message);
+            this.log('Error: setOn() failed: %s', error.message);
             callback(error);
           } else {
             this.log("Power set to %d", on);
@@ -220,7 +224,7 @@ FidelioAccessory.prototype.getVolume = function(callback) {
 
   this._request(url, function (error, result) {
     if (error) {
-      this.log('getVolume() failed: %s', error.message);
+      this.log('Error: getVolume() failed: %s', error.message);
       callback(error, this.cache.volume);
       return;
     }
@@ -253,7 +257,7 @@ FidelioAccessory.prototype.setVolume = function(volume, callback) {
       request(url, function (error, result) {
 
         if (error) {
-          this.log('setVolume() failed: %s', error.message);
+          this.log('Error: setVolume() failed: %s', error.message);
           callback(error);
         } else {
           this.log('Volume Set: %d%% (%d)', volume, vol);
@@ -287,7 +291,7 @@ FidelioAccessory.prototype.setChannel = function(channel, callback) {
 
   request(url, function (error, result) {
     if (error) {
-      this.log('setChannel() failed: %s', error.message);
+      this.log('Error: setChannel() failed: %s', error.message);
       callback(error);
     } else {
       this.log("Channel set to %d (%s)", channel, this.channels[channel-1]);
@@ -323,9 +327,15 @@ function makeVolumeCharacteristic() {
 }
 
 function makeChannelCharacteristic(count) {
-
+  var id;
+  if (uuid !== null) {
+    id = uuid.generate('Channel-' + count);
+  } else {
+    this.log('Warning: hap-nodejs not found; using default uuid');
+    id = '4f8c78f9-c7a2-4316-b53d-f06427f0a09a';
+  }
   channelCharacteristic = function() {
-    Characteristic.call(this, 'Channel', uuid.generate('Channel-' + count));
+    Characteristic.call(this, 'Channel', id);
     this.setProps({
       format: Characteristic.Formats.INT,
       maxValue: count,
