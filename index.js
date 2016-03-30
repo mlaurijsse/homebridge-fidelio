@@ -163,8 +163,8 @@ FidelioAccessory.prototype.getOn = function(callback, silent) {
         callback(null, powerOn);
 
       } else {
-
-        callback(new Error("Invalid HOMESTATUS response"));
+        var err = "Invalid HOMESTATUS response: " + result;
+        callback(new Error(err));
 
       }
   }.bind(this));
@@ -241,7 +241,8 @@ FidelioAccessory.prototype.getVolume = function(callback) {
       this.log('Returned volume from cache: %d', this.cache.volume);
       callback(null, this.cache.volume);
     } else {
-      callback(new Error("Unknown ELAPSE response"));
+      var err = "Unknown ELAPSE response: " + result;
+      callback(new Error(err));
     }
   }.bind(this));
 
