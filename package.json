@@ -22,8 +22,8 @@
     "request": "^2.65.0"
   },
   "optionalDependencies": {
-    "alsa-monitor": "^1.0.1",
-    "loudness": "^0.2.3",
+    "alsa-monitor": "mlaurijsse/alsa-monitor-node",
+    "loudness": "mlaurijsse/node-loudness",
     "hap-nodejs": "^0.2.8"
   }
 }
