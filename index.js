@@ -113,7 +113,7 @@ FidelioAccessory.prototype._initAlsa = function() {
 
   alsa.monitor(function() {
     loudness.getVolume(function (error, vol) {
-      if (err) {
+      if (error) {
         this.log('loudness.getVolume() failed: %s', error.message);
       } else {
         this.setVolume(vol, function(dummy){});
