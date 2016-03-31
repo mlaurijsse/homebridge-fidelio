@@ -161,6 +161,8 @@ FidelioAccessory.prototype._initWatch = function(filename) {
           validVolume = (!isNaN(obj.volume) && obj.volume >= 0 && obj.volume <= 100);
           validChannel = (this.channels && !isNaN(obj.channel) && obj.channel >0 && obj.channel <= this.channels.length);
 
+
+
           // first update power status if applicable
           if (!isNaN(obj.on)) {
 
@@ -186,6 +188,17 @@ FidelioAccessory.prototype._initWatch = function(filename) {
             if (validChannel) {
               this.setChannel(obj.channel, function(dummy){});
             }
+          }
+
+          // special case when alsa volume needs to be restored
+          if (obj.volume == 'alsa' && this.alsa) {
+            loudness.getVolume(function (error, vol) {
+              if (error) {
+                this.log('Error: loudness.getVolume() failed: %s', error.message);
+              } else {
+                this.setVolume(vol, function(dummy){});
+              }
+            }.bind(this));
           }
         } catch (error) {
           this.log("Error: file %s could not be parsed: %s", file, error.message);
