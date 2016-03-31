@@ -1,6 +1,9 @@
 var inherits = require('util').inherits;
 var request = require('request');
 var json5 = require('json5');
+var fs = require('fs');
+var path = require('path');
+
 try {
   var uuid = require('hap-nodejs').uuid;
 } catch (error) {
@@ -66,9 +69,9 @@ function FidelioAccessory(log, config) {
   .on('set', this.setVolume.bind(this));
 
   // Optionally add channel Characteristic
-  if (config.channels) {
-    this.channels = config.channels;
+  this.channels = config.channels || false;
 
+  if (this.channels) {
     // Make channel-n Characteristic
     channelCharacteristic = makeChannelCharacteristic(this.channels.length);
 
@@ -77,6 +80,18 @@ function FidelioAccessory(log, config) {
       .addCharacteristic(channelCharacteristic)
       .on('get', this.getChannel.bind(this))
       .on('set', this.setChannel.bind(this));
+  }
+
+  // Optionally listen for JSON file
+  this.file = config.file || false;
+
+  if(this.file) {
+    try {
+      this._initWatch(this.file);
+    } catch (err) {
+      this.log('Error: failed to init file watcher: %s', err.message);
+      this.channelfile = false;
+    }
   }
 
   // Optionally initiate alsa part
@@ -94,6 +109,7 @@ function FidelioAccessory(log, config) {
   this.cache.volume = config.cache.volume || 10;
   this.cache.volumeNeedsUpdate = false;
   this.cache.channel = config.cache.channel || 1;
+  this.cache.channelNeedsUpdate = false;
 
   this.log("Added speaker: %s, host: %s", this.name, this.host);
 
@@ -126,6 +142,62 @@ FidelioAccessory.prototype._initAlsa = function() {
   }.bind(this));
 };
 
+FidelioAccessory.prototype._initWatch = function(filename) {
+
+  // We want to watch the whole path, in case the file does not (yet) exist
+  fs.watch(path.dirname(filename), function(event, file) {
+
+    // Check if we're triggerd for the correct file
+    if (path.basename(filename) == file) {
+
+      // Try to open file
+      fs.readFile(filename, 'utf8', function(err, data) {
+        if (err) {
+          this.log("Error: error reading file: %s", err);
+        }
+        try {
+          var obj = json5.parse(data);
+
+          validVolume = (!isNaN(obj.volume) && obj.volume >= 0 && obj.volume <= 100);
+          validChannel = (this.channels && !isNaN(obj.channel) && obj.channel >0 && obj.channel <= this.channels.length);
+
+          // first update power status if applicable
+          if (!isNaN(obj.on)) {
+
+            // do not use caches if we have a new value
+            if (validVolume) this.cache.volumeNeedsUpdate = false;
+            if (validChannel) this.cache.channelNeedsUpdate = false;
+
+            this.setOn(obj.on, function(dummy){
+                // then update volume & channel
+                if (validVolume) {
+                  this.setVolume(obj.volume, function(dummy){});
+                }
+                if (validChannel) {
+                  this.setChannel(obj.channel, function(dummy){});
+                }
+              }.bind(this));
+
+          } else {
+            // if no power status is included, still update volume and/or channel
+            if (validVolume) {
+              this.setVolume(obj.volume, function(dummy){});
+            }
+            if (validChannel) {
+              this.setChannel(obj.channel, function(dummy){});
+            }
+          }
+        } catch (error) {
+          this.log("Error: file %s could not be parsed: %s", file, error.message);
+        }
+      }.bind(this));
+    }
+  }.bind(this));
+
+};
+
+
+
 FidelioAccessory.prototype._request = function (url, callback) {
 
   request(url, function (error, response, body) {
@@ -144,7 +216,7 @@ FidelioAccessory.prototype._request = function (url, callback) {
 
 
 
-FidelioAccessory.prototype.getOn = function(callback, silent) {
+FidelioAccessory.prototype.getOn = function(callback, context, silent) {
 
   var url = this.url + 'HOMESTATUS';
 
@@ -183,10 +255,12 @@ FidelioAccessory.prototype.setOn = function(on, callback) {
       } else {
         this.log("Power set to %d", on);
         if (this.cache.volumeNeedsUpdate) {
-          this.setVolume(this.cache.volume, callback);
-        } else {
-          callback(null);
+          this.setVolume(this.cache.volume, function(dummy){});
         }
+        if (this.cache.channelNeedsUpdate) {
+          this.setChannel(this.cache.channel, function(dummy){});
+        }
+        callback(null);
       }
     }.bind(this));
 
@@ -273,7 +347,7 @@ FidelioAccessory.prototype.setVolume = function(volume, callback) {
       this.cache.volumeNeedsUpdate = true;
       callback(null);
     }
-  }.bind(this), true);
+  }.bind(this), 'setVolume', true);
 
 };
 
@@ -288,19 +362,28 @@ FidelioAccessory.prototype.getChannel = function(callback) {
 
 FidelioAccessory.prototype.setChannel = function(channel, callback) {
 
-  var url = this.url + this.channels[channel-1];
+  this.getOn(function (error, on) {
+    if (!error && on) {
 
-  request(url, function (error, result) {
-    if (error) {
-      this.log('Error: setChannel() failed: %s', error.message);
-      callback(error);
+      var url = this.url + this.channels[channel-1];
+
+      request(url, function (error, result) {
+        if (error) {
+          this.log('Error: setChannel() failed: %s', error.message);
+          callback(error);
+        } else {
+          this.log("Channel set to %d (%s)", channel, this.channels[channel-1]);
+          this.cache.channel = channel;
+          callback(null);
+        }
+      }.bind(this));
     } else {
-      this.log("Channel set to %d (%s)", channel, this.channels[channel-1]);
+      this.log('Wrote channel to cache: %d', channel);
       this.cache.channel = channel;
+      this.cache.channelNeedsUpdate = true;
       callback(null);
     }
-  }.bind(this));
-
+  }.bind(this), 'setChannel', true);
 };
 
 
