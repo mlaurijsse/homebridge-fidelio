@@ -1,13 +1,13 @@
 # Fidelio Platform
 This is a plugin for [Homebridge](https://github.com/nfarina/homebridge). This plugin enables control of the Philips Fidelio A1, A3, A5 and A9 (also known as AW1000, AW3000, AW5000, AW9000) via iOS HomeKit.
 
-## install
+## Install
 To install globally:
 ```
 sudo npm install -g https://github.com/mlaurijsse/homebridge-fidelio
 ```
 
-## config
+## Config
 Example config.json:
 
 ```
