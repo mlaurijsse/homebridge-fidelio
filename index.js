@@ -3,6 +3,7 @@ var request = require('request');
 var json5 = require('json5');
 var fs = require('fs');
 var path = require('path');
+var watch = require('node-watch');
 
 try {
   var uuid = require('hap-nodejs').uuid;
@@ -143,12 +144,11 @@ FidelioAccessory.prototype._initAlsa = function() {
 };
 
 FidelioAccessory.prototype._initWatch = function(filename) {
-
   // We want to watch the whole path, in case the file does not (yet) exist
-  fs.watch(path.dirname(filename), function(event, file) {
+  watch(path.dirname(filename), function(file) {
 
     // Check if we're triggerd for the correct file
-    if (path.basename(filename) == file) {
+    if (filename == file) {
 
       // Try to open file
       fs.readFile(filename, 'utf8', function(err, data) {
