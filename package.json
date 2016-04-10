@@ -3,6 +3,10 @@
   "version": "0.0.3",
   "description": "Philips Fidelio A3/A5/A9 (AW series) plugin for homebridge: https://github.com/nfarina/homebridge",
   "license": "ISC",
+  "author": {
+    "name": "Marcel Laurijsse",
+    "url": "https://github.com/mlaurijsse/node-fidelio"
+  },
   "keywords": [
     "homebridge-plugin"
   ],
