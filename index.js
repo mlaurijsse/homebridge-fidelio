@@ -133,11 +133,29 @@ FidelioAccessory.prototype._initAlsa = function() {
   }
 
   alsa.monitor(function() {
-    loudness.getVolume(function (error, vol) {
-      if (error) {
-        this.log('Error: loudness.getVolume() failed: %s', error.message);
+    // if alsa state changes, run following callback
+
+    loudness.getMuted(function (error,muted) {
+      // check if alsa is muted
+      if (muted === true) {
+        // If I'm muted set volume to 0
+        this.setVolume(0, function(dummy){});
+
       } else {
-        this.setVolume(vol, function(dummy){});
+        // I'm unmuted so check volume
+        loudness.getVolume(function (error, vol) {
+          if (typeof vol == "number" && !isNaN(vol)) {
+            // I got a volume, so proceed
+            this.setVolume(vol, function(dummy){});
+
+          } else {
+            this.log('Error: loudness.getVolume() has invalid response');
+          }
+          if (error) {
+            // All output to stderr is returned by Loudness, print all warnings&errors
+            this.log('Warning: loudness.getVolume() returned: %s', error.message);
+          }
+        }.bind(this));
       }
     }.bind(this));
   }.bind(this));
