@@ -147,9 +147,8 @@ FidelioAccessory.prototype._initAlsa = function() {
           if (typeof vol == "number" && !isNaN(vol)) {
             // I got a volume, so proceed
             this.setVolume(vol, function(dummy){});
-
           } else {
-            this.log('Error: loudness.getVolume() has invalid response');
+            this.log('Error: loudness.getVolume() has invalid response: %s', vol);
           }
           if (error) {
             // All output to stderr is returned by Loudness, print all warnings&errors
