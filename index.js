@@ -245,8 +245,11 @@ FidelioAccessory.prototype._setState = function(state, callback) {
         if(error === null && result == 1) {
           // apparently I'm switched on, so switch me off;
           this._request(this.url + 'CTRL$STANDBY', function (error, result) {
+            if(!error) {
+              this.cache.on = 0;
+            }
             callback(error);
-          });
+          }.bind(this));
           return;
         }
         callback(error);
@@ -265,8 +268,11 @@ FidelioAccessory.prototype._setState = function(state, callback) {
     // switch me on by calling index
     var url = this.url + 'index';
     request(url, function (error, result) {
+      if(!error) {
+        this.cache.on = 1;
+      }
       callback(error);
-    });
+    }.bind(this));
     // we're switched on, so we're done
     return;
   }
@@ -301,6 +307,7 @@ FidelioAccessory.prototype._doChannelRequest = function(channel, callback) {
   this.log("Channel: %s (%d)",this.channels[channel-1], channel);
   this._request(this.url + this.channels[channel-1], function (error, result) {
     if (!error) {
+      this.cache.on = 1;
       this.cache.channel = channel;
       this.cache.channelNeedsUpdate = false;
     }
@@ -314,6 +321,7 @@ FidelioAccessory.prototype._doVolumeRequest = function(volume, callback) {
   volume = Math.round(volume / 100.0 * 64.0);
   this._request(this.url + 'VOLUME$VAL$' + volume, function (error, result) {
     if (!error) {
+      this.cache.on = 1;
       this.cache.volume = volume;
       this.cache.volumeNeedsUpdate = false;
     }
@@ -330,9 +338,10 @@ FidelioAccessory.prototype._getPower = function(callback) {
     var obj = json5.parse(result);
     if (obj.command == 'STANDBY') {
       var powerOn = !obj.value;
+      this.cache.on = powerOn;
       return callback(null, powerOn);
     } else {
-      return callback(new error("Invalid HOMESTATUS response: " + result), this.cache.on);
+      return callback(new Error("Invalid HOMESTATUS response: " + result), this.cache.on);
     }
   }.bind(this));
 };
