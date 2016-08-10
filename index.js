@@ -4,6 +4,7 @@ var json5 = require('json5');
 var fs = require('fs');
 var path = require('path');
 var watch = require('node-watch');
+var async = require('async');
 
 try {
   var uuid = require('hap-nodejs').uuid;
@@ -21,8 +22,6 @@ try {
   var loudness = null;
 }
 
-
-
 var Service, Characteristic, VolumeCharacteristic;
 var devices = [];
 
@@ -37,11 +36,9 @@ module.exports = function(homebridge) {
 };
 
 
-
 //
 // Fidelio Accessory
 //
-
 function FidelioAccessory(log, config) {
   this.log = log;
   this.config = config;
@@ -51,7 +48,6 @@ function FidelioAccessory(log, config) {
 
   // Set device information
   this.informationService = new Service.AccessoryInformation();
-
   this.informationService
     .setCharacteristic(Characteristic.Manufacturer, "Philips")
     .setCharacteristic(Characteristic.Model, "Fidelio");
@@ -102,15 +98,14 @@ function FidelioAccessory(log, config) {
   }
 
   // initiate cache settings
-  this.cache = {};
   if (!config.cache) {
     config.cache = false;
   }
-  this.cache.on = config.cache.on || false;
-  this.cache.volume = config.cache.volume || 10;
-  this.cache.volumeNeedsUpdate = false;
-  this.cache.channel = config.cache.channel || 1;
-  this.cache.channelNeedsUpdate = false;
+  this.cache = {on: config.cache.on || false,
+                volume: config.cache.volume || 10,
+                volumeNeedsUpdate: false,
+                channel: config.cache.channel || 1,
+                channelNeedsUpdate: false};
 
   this.log("Added speaker: %s, host: %s", this.name, this.host);
 
@@ -131,32 +126,38 @@ FidelioAccessory.prototype._initAlsa = function() {
     this.alsa = false;
     return;
   }
-
-  alsa.monitor(function() {
-    // if alsa state changes, run following callback
-
-    loudness.getMuted(function (error,muted) {
-      // check if alsa is muted
-      if (muted === true) {
-        // If I'm muted set volume to 0
-        this.setVolume(0, function(dummy){});
-
-      } else {
-        // I'm unmuted so check volume
-        loudness.getVolume(function (error, vol) {
-          if (typeof vol == "number" && !isNaN(vol)) {
-            // I got a volume, so proceed
-            this.setVolume(vol, function(dummy){});
-          } else {
-            this.log('Error: loudness.getVolume() has invalid response: %s', vol);
-          }
-          if (error) {
-            // All output to stderr is returned by Loudness, print all warnings&errors
-            this.log('Warning: loudness.getVolume() returned: %s', error.message);
-          }
-        }.bind(this));
+  alsa.monitor(function () {
+    state.volume = alsa;
+    this._setState(state, function(error){
+      if(error) {
+        this.log("Failed to set alsa state: %s", error.message);
       }
     }.bind(this));
+  }.bind(this));
+};
+
+// if alsa state changes, run following callback
+FidelioAccessory.prototype._getAlsa = function(callback) {
+  //check if alsa is active
+  if (!this.alsa) {
+    return callback(new Error('Alsa not configured'));
+  }
+
+  //check for mute first, then for volume
+  loudness.getMuted(function (error,muted) {
+    if (muted === true) {
+      // If I'm muted set volume to 0
+      return callback(null, 0);
+    } else {
+      loudness.getVolume(function (error, vol) {
+        if (typeof vol == "number" && !isNaN(vol)) {
+          // I got a volume, so proceed
+          return callback(null, vol);
+        } else {
+          return callback(error);
+        }
+      }.bind(this));
+    }
   }.bind(this));
 };
 
@@ -173,63 +174,21 @@ FidelioAccessory.prototype._initWatch = function(filename) {
           this.log("Error: error reading file: %s", err);
         }
         try {
-          var obj = json5.parse(data);
-
-          validVolume = (!isNaN(obj.volume) && obj.volume >= 0 && obj.volume <= 100);
-          validChannel = (this.channels && !isNaN(obj.channel) && obj.channel >0 && obj.channel <= this.channels.length);
-
-
-
-          // first update power status if applicable
-          if (!isNaN(obj.on)) {
-
-            // do not use caches if we have a new value
-            if (validVolume) this.cache.volumeNeedsUpdate = false;
-            if (validChannel) this.cache.channelNeedsUpdate = false;
-
-            this.setOn(obj.on, function(dummy){
-                // then update volume & channel
-                if (validVolume) {
-                  this.setVolume(obj.volume, function(dummy){});
-                }
-                if (validChannel) {
-                  this.setChannel(obj.channel, function(dummy){});
-                }
-              }.bind(this));
-
-          } else {
-            // if no power status is included, still update volume and/or channel
-            if (validVolume) {
-              this.setVolume(obj.volume, function(dummy){});
+          var state = json5.parse(data);
+          this._setState(state, function(error) {
+            if (error) {
+              this.log("Error: file state could not be executed: %s", error.message);
             }
-            if (validChannel) {
-              this.setChannel(obj.channel, function(dummy){});
-            }
-          }
-
-          // special case when alsa volume needs to be restored
-          if (obj.volume == 'alsa' && this.alsa) {
-            loudness.getVolume(function (error, vol) {
-              if (error) {
-                this.log('Error: loudness.getVolume() failed: %s', error.message);
-              } else {
-                this.setVolume(vol, function(dummy){});
-              }
-            }.bind(this));
-          }
+          }.bind(this));
         } catch (error) {
           this.log("Error: file %s could not be parsed: %s", file, error.message);
         }
       }.bind(this));
     }
   }.bind(this));
-
 };
 
-
-
 FidelioAccessory.prototype._request = function (url, callback) {
-
   request(url, function (error, response, body) {
     if (error) {
       callback(error);
@@ -244,93 +203,170 @@ FidelioAccessory.prototype._request = function (url, callback) {
 
 };
 
+FidelioAccessory.prototype._setState = function(state, callback) {
+  // if no power state is given, get current state first
+  if (isNaN(state.power)) {
+    this._getPower(function(error, result) {
+      // we ignore errors, since we always have cached values
+      state.power = result+2;
+      // now recurse into ourselves with the polled power state
+      this._setState(state, callback);
+    }.bind(this));
+  return;
+  }
 
-
-FidelioAccessory.prototype.getOn = function(callback, context, silent) {
-
-  var url = this.url + 'HOMESTATUS';
-
-  this._request(url, function (error, result) {
-    if (error) {
-      this.log('Error: getOn() failed: %s', error.message);
-      callback(error, this.cache.on);
-      return;
-    }
-      var obj = json5.parse(result);
-      if (obj.command == 'STANDBY') {
-        var powerOn = !obj.value;
-        if (!silent) {
-          this.log('Power is currently %d', powerOn);
-        }
-        callback(null, powerOn);
-
-      } else {
-        var err = "Invalid HOMESTATUS response: " + result;
-        callback(new Error(err));
-
+  // if alsa volume is required get it first
+  if (state.volume == 'alsa') {
+    this._getAlsa(function(error, vol) {
+      if(error) {
+        return callback(error);
       }
-  }.bind(this));
-};
+      state.volume = vol;
+      // now recurse into ourselves with the polled volume
+      this._setState(state, callback);
+    }.bind(this));
+    return;
+  }
 
-FidelioAccessory.prototype.setOn = function(on, callback) {
+  // if (needs) to be switched off, store values in cache
+  if (state.power === 0 || state.power === false || state.power == 2) {
+    if (!isNaN(state.volume)) {
+      this.cache.volume = state.volume;
+      this.cache.volumeNeedsUpdate = true;
+    }
+    if (!isNaN(state.channel)) {
+      this.cache.channel = state.channel;
+      this.cache.channelNeedsUpdate = true;
+    }
 
-  if (on) {
+    // and switch off
+    if (state.power === 0 || state.power === false) {
+      this._getPower(function(error,result){
+        if(error === null && result == 1) {
+          // apparently I'm switched on, so switch me off;
+          this._request(this.url + 'CTRL$STANDBY', function (error, result) {
+            callback(error);
+          });
+          return;
+        }
+        callback(error);
+      }.bind(this));
+    } else {
+      //I'm already switched off, nothing to do
+      callback(null);
+    }
+    // we're switched off, so we're done
+    return;
+  }
+
+  // jeah we're on or need to be on :)
+  // is it just a power on request? No other state changes?
+  if (isNaN(state.channel) && isNaN(state.volume) && !this.cache.volumeNeedsUpdate && !this.cache.channelNeedsUpdate) {
     // switch me on by calling index
     var url = this.url + 'index';
     request(url, function (error, result) {
-
-      if (error) {
-        this.log('Error: setOn() failed: %s', error.message);
-        callback(error);
-      } else {
-        this.log("Power set to %d", on);
-        if (this.cache.volumeNeedsUpdate) {
-          this.setVolume(this.cache.volume, function(dummy){});
-        }
-        if (this.cache.channelNeedsUpdate) {
-          this.setChannel(this.cache.channel, function(dummy){});
-        }
-        callback(null);
-      }
-    }.bind(this));
-
-  } else {
-    // switch me off
-
-    // first check if I'm not yet switched off
-    this.getOn(function (err,state) {
-      if (err) {
-        this.log('Error: setOn() failed: %s', err.message);
-        callback(err);
-        return;
-      }
-      if (state == 1) {
-        // apparently I'm switched on, so switch me off;
-        var url = this.url + 'CTRL$STANDBY';
-        request(url, function (error, result) {
-          if (error) {
-            this.log('Error: setOn() failed: %s', error.message);
-            callback(error);
-          } else {
-            this.log("Power set to %d", on);
-            callback(null);
-          }
-        }.bind(this));
-      } else {
-        callback(null);
-      }
-    }.bind(this), true);
+      callback(error);
+    });
+    // we're switched on, so we're done
+    return;
   }
+
+  //now finally, set state & volume, if applicable
+  async.parallel([
+    // If needed, set channel
+    function (callback){
+      channel = state.channel || (this.cache.channelNeedsUpdate?this.cache.channel:false);
+      if (!channel) {
+        return callback(null);
+      }
+      this._doChannelRequest(channel, callback);
+    }.bind(this),
+
+    // If needed, set volume
+    function (callback) {
+      if (isNaN(state.volume) && !this.cache.volumeNeedsUpdate ) {
+        //nothing to do
+        return callback(null);
+      }
+      volume = (!isNaN(state.volume))?state.volume:this.cache.volume;
+      this._doVolumeRequest(volume, callback);
+    }.bind(this)],
+  callback);
+};
+
+FidelioAccessory.prototype._doChannelRequest = function(channel, callback) {
+  if (!this.channels || channel <= 0 || channel > this.channels.length) {
+    return callback(new Error('Channels not configured or out of bounds'));
+  }
+  this.log("Channel: %s (%d)",this.channels[channel-1], channel);
+  this._request(this.url + this.channels[channel-1], function (error, result) {
+    if (!error) {
+      this.cache.channel = channel;
+      this.cache.channelNeedsUpdate = false;
+    }
+    callback(error);
+  }.bind(this));
+};
+FidelioAccessory.prototype._doVolumeRequest = function(volume, callback) {
+  if (!(volume >= 0 && volume <= 100)) {
+    return callback(new Error('Volume out of bounds'));
+  }
+  volume = Math.round(volume / 100.0 * 64.0);
+  this._request(this.url + 'VOLUME$VAL$' + volume, function (error, result) {
+    if (!error) {
+      this.cache.volume = volume;
+      this.cache.volumeNeedsUpdate = false;
+    }
+    callback(error);
+  }.bind(this));
+};
+
+FidelioAccessory.prototype._getPower = function(callback) {
+  var url = this.url + 'HOMESTATUS';
+  this._request(url, function (error, result) {
+    if (error) {
+      return callback(error, this.cache.on);
+    }
+    var obj = json5.parse(result);
+    if (obj.command == 'STANDBY') {
+      var powerOn = !obj.value;
+      return callback(null, powerOn);
+    } else {
+      return callback(new error("Invalid HOMESTATUS response: " + result), this.cache.on);
+    }
+  }.bind(this));
+};
+
+FidelioAccessory.prototype.getOn = function(callback) {
+  this._getPower(function (error,result) {
+    if (error) {
+      this.log('Error: getOn() failed: %s', error.message);
+    } else {
+      this.log('Power is currently %d', result);
+    }
+    return callback(error, result);
+  }.bind(this));
+};
+
+
+FidelioAccessory.prototype.setOn = function(on, callback) {
+  var state = { power: on };
+  this._setState(state, function(error) {
+    if (error) {
+      this.log('Error: setOn failed: %s', error.message);
+    } else {
+      this.log('Power is set to %d', on);
+    }
+    return callback(error);
+  }.bind(this));
 };
 
 FidelioAccessory.prototype.getVolume = function(callback) {
   var url = this.url + 'ELAPSE';
-
   this._request(url, function (error, result) {
     if (error) {
       this.log('Error: getVolume() failed: %s', error.message);
-      callback(error, this.cache.volume);
-      return;
+      return callback(error, this.cache.volume);
     }
 
     var obj = json5.parse(result);
@@ -339,46 +375,29 @@ FidelioAccessory.prototype.getVolume = function(callback) {
       var vol = Math.round(obj.volume / 64.0 * 100.0);
       this.log('Got current volume: %d%% (%d)', vol, obj.volume);
       this.cache.volume = vol;
-      callback(null, vol);
+      return callback(null, vol);
 
     } else if (obj.command == 'NOTHING') {
       this.log('Returned volume from cache: %d', this.cache.volume);
-      callback(null, this.cache.volume);
+      return callback(null, this.cache.volume);
+
     } else {
       var err = "Unknown ELAPSE response: " + result;
-      callback(new Error(err));
+      return callback(new Error(err));
     }
   }.bind(this));
-
 };
 
 FidelioAccessory.prototype.setVolume = function(volume, callback) {
-
-  this.getOn(function (error, on) {
-    if (!error && on) {
-      var vol = Math.round(volume / 100.0 * 64.0);
-
-      var url = this.url + 'VOLUME$VAL$' + vol;
-      request(url, function (error, result) {
-
-        if (error) {
-          this.log('Error: setVolume() failed: %s', error.message);
-          callback(error);
-        } else {
-          this.log('Volume Set: %d%% (%d)', volume, vol);
-          this.cache.volume = volume;
-          this.cache.volumeNeedsUpdate = false;
-          callback(null);
-        }
-      }.bind(this));
+  var state = { volume: volume };
+  this._setState(state, function(error){
+    if (error) {
+      this.log('Error: setVolume failed: %s', error.message);
     } else {
-      this.log('Wrote volume to cache: %d%%', volume);
-      this.cache.volume = volume;
-      this.cache.volumeNeedsUpdate = true;
-      callback(null);
+      this.log('Volume is set to %d', volume);
     }
-  }.bind(this), 'setVolume', true);
-
+    return callback(error);
+  }.bind(this));
 };
 
 FidelioAccessory.prototype.getChannel = function(callback) {
@@ -391,37 +410,21 @@ FidelioAccessory.prototype.getChannel = function(callback) {
 
 
 FidelioAccessory.prototype.setChannel = function(channel, callback) {
-
-  this.getOn(function (error, on) {
-    if (!error && on) {
-
-      var url = this.url + this.channels[channel-1];
-
-      request(url, function (error, result) {
-        if (error) {
-          this.log('Error: setChannel() failed: %s', error.message);
-          callback(error);
-        } else {
-          this.log("Channel set to %d (%s)", channel, this.channels[channel-1]);
-          this.cache.channel = channel;
-          callback(null);
-        }
-      }.bind(this));
+  var state = { power: true, channel: channel };
+  this._setState(state, function(error){
+    if (error) {
+      this.log('Error: setChannel failed: %s', error.message);
     } else {
-      this.log('Wrote channel to cache: %d', channel);
-      this.cache.channel = channel;
-      this.cache.channelNeedsUpdate = true;
-      callback(null);
+      this.log('Channel is set to %d', channel);
     }
-  }.bind(this), 'setChannel', true);
+    return callback(error);
+  }.bind(this));
 };
-
 
 
 //
 // Custom Characteristic for Volume
 //
-
 function makeVolumeCharacteristic() {
 
   VolumeCharacteristic = function() {
