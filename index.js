@@ -127,7 +127,7 @@ FidelioAccessory.prototype._initAlsa = function() {
     return;
   }
   alsa.monitor(function () {
-    state.volume = alsa;
+    var state = {volume: 'alsa'};
     this._setState(state, function(error){
       if(error) {
         this.log("Failed to set alsa state: %s", error.message);
