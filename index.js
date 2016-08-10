@@ -448,7 +448,7 @@ function makeChannelCharacteristic(count) {
   if (uuid !== null) {
     id = uuid.generate('Channel-' + count);
   } else {
-    this.log('Warning: hap-nodejs not found; using default uuid');
+    //this.log('Warning: hap-nodejs not found; using default uuid');
     id = '4f8c78f9-c7a2-4316-b53d-f06427f0a09a';
   }
   channelCharacteristic = function() {
