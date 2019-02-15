@@ -28,7 +28,7 @@
     "async": "^2.0.1"
   },
   "optionalDependencies": {
-    "alsa-monitor": "illegalprime/alsa-monitor-node",
+    "alsa-monitor": "mlaurijsse/alsa-monitor-node",
     "loudness": "mlaurijsse/node-loudness"
   }
 }
