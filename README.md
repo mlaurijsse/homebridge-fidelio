@@ -17,6 +17,7 @@ Example config.json:
       "accessory": "Fidelio",
       "name": "Living Room Speakers",
       "host": "192.168.0.10",
+      "type": "speaker",
       "channels": [
         "nav$03$03$001$1",
         "nav$03$03$002$1",
@@ -33,6 +34,8 @@ Example config.json:
 
 ```
 The `host` can be a hostname or ip address. The hostname of your speaker can be configured using the Airstudio+ app. However, I found reference by hostname was unstable in my setup, during boot/reset the hostname 'blackfin' is sometimes used.
+
+By setting `type`, you can chose the service type of the Fidelio. Options: 'speaker', 'switch', 'fan', 'lightbulb'. Note that the native Home app, doesn't support speaker. For types 'fan' and 'lightbulb' the speaker volume can be controlled by the 'RotationSpeed' or 'Brightness' characteristic.
 
 The `channels` represent different sources supported by the speaker. To investigate all options please visit http://hostname:8889/index
 
