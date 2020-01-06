@@ -173,7 +173,7 @@ function FidelioAccessory(log, config) {
       this.alsa = false;
       return;
     }
-    alsa.monitor(function () {
+    alsa.volume.on("change", function () {
       var state = {volume: 'alsa'};
       this._setState(state, function(error){
         if(error) {
@@ -401,7 +401,7 @@ function FidelioAccessory(log, config) {
           this.log('Power is currently %d', result);
         }
         if (this.config.type == 'speaker') {
-          result = !result; 
+          result = !result;
         }
 
         return callback(error, result);
