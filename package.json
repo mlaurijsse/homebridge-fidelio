@@ -1,6 +1,6 @@
 {
   "name": "homebridge-fidelio",
-  "version": "0.1.2",
+  "version": "1.0.0",
   "description": "Philips Fidelio A3/A5/A9 (AW series) plugin for homebridge: https://github.com/nfarina/homebridge",
   "license": "ISC",
   "author": {
